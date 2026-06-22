@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -19,6 +20,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+	case "setup-gitignore-local":
+		if err := setupGitignoreLocal(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		usage()
@@ -31,6 +37,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "commands:")
 	fmt.Fprintln(os.Stderr, "  checkout-main-and-update    checkout main/master and pull latest")
+	fmt.Fprintln(os.Stderr, "  setup-gitignore-local       configure a repo-local .gitignore.local that never pushes to the remote")
 }
 
 func checkoutMainAndUpdate() error {
@@ -58,6 +65,42 @@ func checkoutMainAndUpdate() error {
 	}
 
 	fmt.Printf("up to date on %s\n", branch)
+	return nil
+}
+
+func setupGitignoreLocal() error {
+	if err := assertGitRepo(); err != nil {
+		return err
+	}
+
+	root, err := gitOutput("rev-parse", "--show-toplevel")
+	if err != nil {
+		return fmt.Errorf("could not determine repository root: %w", err)
+	}
+
+	localIgnore := filepath.Join(root, ".gitignore.local")
+
+	// point git's per-repo excludes file at .gitignore.local so its patterns
+	// are honoured without living in the tracked .gitignore
+	fmt.Printf("configuring core.excludesFile -> %s\n", localIgnore)
+	if err := git("config", "--local", "core.excludesFile", localIgnore); err != nil {
+		return fmt.Errorf("failed to set core.excludesFile: %w", err)
+	}
+
+	if _, err := os.Stat(localIgnore); err == nil {
+		fmt.Printf("%s already exists, leaving it untouched\n", localIgnore)
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("could not check %s: %w", localIgnore, err)
+	}
+
+	// seed the file so it ignores itself and never reaches the remote
+	fmt.Printf("creating %s\n", localIgnore)
+	if err := os.WriteFile(localIgnore, []byte(".gitignore.local\n"), 0o644); err != nil {
+		return fmt.Errorf("failed to create %s: %w", localIgnore, err)
+	}
+
+	fmt.Println("done — add local-only ignore patterns to .gitignore.local")
 	return nil
 }
 

@@ -22,6 +22,7 @@ alias latest-main="michael-cmd checkout-main-and-update"
 | Command | Description |
 |---|---|
 | `checkout-main-and-update` | Checkout `main`/`master` and pull latest. Errors if working tree is dirty. |
+| `setup-gitignore-local` | Point the repo's `core.excludesFile` at a root `.gitignore.local` and create it (self-ignoring) so local-only ignore patterns never push to the remote. |
 
 ## Build
 

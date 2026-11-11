@@ -16,7 +16,12 @@ func main() {
 
 	switch os.Args[1] {
 	case "checkout-main-and-update":
-		if err := checkoutMainAndUpdate(); err != nil {
+		force, err := parseForceFlag(os.Args[2:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := checkoutMainAndUpdate(force); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
@@ -36,21 +41,56 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: michael-cmd <command>")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  checkout-main-and-update    checkout main/master and pull latest")
+	fmt.Fprintln(os.Stderr, "  checkout-main-and-update [--force]")
+	fmt.Fprintln(os.Stderr, "                              checkout main/master and pull latest")
+	fmt.Fprintln(os.Stderr, "                              --force skips the clean-tree check, but only when")
+	fmt.Fprintln(os.Stderr, "                              already on main/master (never switches branches)")
 	fmt.Fprintln(os.Stderr, "  setup-gitignore-local       configure a repo-local .gitignore.local that never pushes to the remote")
 }
 
-func checkoutMainAndUpdate() error {
-	if err := assertGitRepo(); err != nil {
-		return err
+func parseForceFlag(args []string) (bool, error) {
+	force := false
+	for _, arg := range args {
+		switch arg {
+		case "--force":
+			force = true
+		default:
+			return false, fmt.Errorf("unknown argument %q (only --force is supported)", arg)
+		}
 	}
+	return force, nil
+}
 
-	if err := assertNoUnstagedChanges(); err != nil {
+func checkoutMainAndUpdate(force bool) error {
+	if err := assertGitRepo(); err != nil {
 		return err
 	}
 
 	branch, err := detectDefaultBranch()
 	if err != nil {
+		return err
+	}
+
+	if force {
+		// --force only relaxes the working-tree guard; it never switches branches
+		current, err := currentBranch()
+		if err != nil {
+			return err
+		}
+		if current != branch {
+			return fmt.Errorf("refusing to switch branches — --force only pulls an already checked-out %s, but the current branch is %s", branch, current)
+		}
+
+		fmt.Printf("--force: skipping working-tree check, pulling %s as-is...\n", branch)
+		if err := git("pull"); err != nil {
+			return fmt.Errorf("pull failed: %w", err)
+		}
+
+		fmt.Printf("up to date on %s\n", branch)
+		return nil
+	}
+
+	if err := assertNoUnstagedChanges(); err != nil {
 		return err
 	}
 
@@ -176,6 +216,14 @@ func detectDefaultBranch() (string, error) {
 	}
 
 	return "", fmt.Errorf("could not detect default branch (expected 'main' or 'master')")
+}
+
+func currentBranch() (string, error) {
+	out, err := gitOutput("symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("could not determine current branch (detached HEAD?)")
+	}
+	return out, nil
 }
 
 func git(args ...string) error {
